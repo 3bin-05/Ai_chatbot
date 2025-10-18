@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ebin's Chatbot</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/256/5278/5278402.png">
+    <!-- Load Tailwind CSS from CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar for better aesthetics */
+        #chat-history::-webkit-scrollbar { width: 8px; }
+        #chat-history::-webkit-scrollbar-thumb { background-color: #4B5563; border-radius: 10px; }
+        #chat-history::-webkit-scrollbar-track { background-color: #1F2937; }
+        /* Font setup */
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-dark': '#111827',
+                        'secondary-dark': '#1F2937',
+                        'accent-blue': '#3B82F6',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-primary-dark text-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <!-- Main Chat Container -->
+    <div class="w-full max-w-2xl bg-secondary-dark rounded-xl shadow-2xl flex flex-col h-[90vh] md:h-[80vh]">
+        
+        <!-- Header -->
+        <header class="p-4 border-b border-gray-700 flex items-center">
+          
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+            </svg>
+            <h1 class="text-xl font-bold">Private Chatbot</h1>
+        </header>
+
+        <!-- Chat History Display Area -->
+        <main id="chat-history" class="flex-grow p-4 overflow-y-auto space-y-4">
+            <!-- Initial Message -->
+            <div class="flex justify-start">
+                <div class="bg-gray-700 p-3 rounded-lg max-w-xs md:max-w-md shadow-md">
+                    <p class="font-semibold text-accent-blue">Bot</p>
+                    <p>Hi! there go ahead and ask me anything.</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Loading Indicator -->
+        <div id="loading-indicator" class="hidden p-3 text-center text-accent-blue">
+            <svg class="animate-spin h-5 w-5 mr-3 inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Bot is thinking...
+        </div>
+
+        <!-- Input Area -->
+        <footer class="p-4 border-t border-gray-700">
+            <form id="chat-form" class="flex space-x-3">
+                <input type="text" id="user-input" placeholder="Ask about study tips, career paths, or motivation..." 
+                       class="flex-grow p-3 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-accent-blue placeholder-gray-400 transition"
+                       autocomplete="off" required>
+                <button type="submit" id="send-button" 
+                        class="bg-accent-blue hover:bg-blue-600 text-white font-semibold py-3 px-4 rounded-lg shadow-md transition duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                </button>
+            </form>
+            <div id="status-message" class="mt-2 text-sm text-red-400 hidden"></div>
+        </footer>
+    </div>
+
+    <script>
+        // Global Constants
+        const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent";
+        // NOTE: The API key is injected at runtime by the environment.
+        const API_KEY = ""; 
+
+        // DOM Elements
+        const chatHistory = document.getElementById('chat-history');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const statusMessage = document.getElementById('status-message');
+
+        // Conversation history structure for the API
+        let conversationHistory = [];
+
+        // Define MentorBot's persona
+        const systemPrompt = "You are 'MentorBot', a kind, encouraging, and knowledgeable academic and career advisor. Keep your responses concise (ideally 1-2 paragraphs), uplifting, and focused on helping the user achieve their goals. When asked for advice, summarize key points and always offer a specific follow-up question to keep the conversation going.";
+
+        /**
+         * Adds a message bubble to the chat history.
+         * @param {string} text - The message content.
+         * @param {string} sender - 'user' or 'bot'.
+         */
+        function displayMessage(text, sender) {
+            const messageContainer = document.createElement('div');
+            messageContainer.className = `flex ${sender === 'user' ? 'justify-end' : 'justify-start'}`;
+            
+            const messageBubble = document.createElement('div');
+            // Use different styling for user and bot messages
+            const bgColor = sender === 'user' ? 'bg-accent-blue' : 'bg-gray-700';
+            const senderName = sender === 'user' ? 'You' : 'MentorBot';
+            
+            messageBubble.className = `${bgColor} p-3 rounded-lg max-w-xs md:max-w-md shadow-md whitespace-pre-wrap`;
+            
+            if (sender === 'bot') {
+                 // Add bot name and slightly adjust text color for emphasis
+                const nameSpan = document.createElement('p');
+                nameSpan.className = 'font-semibold text-blue-300';
+                nameSpan.textContent = senderName;
+                messageBubble.appendChild(nameSpan);
+            }
+
+            const textNode = document.createElement('p');
+            textNode.innerHTML = text; // Allow for basic formatting (like markdown conversion)
+            messageBubble.appendChild(textNode);
+            
+            messageContainer.appendChild(messageBubble);
+            chatHistory.appendChild(messageContainer);
+            
+            // Scroll to the bottom to see the new message
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+        
+        /**
+         * Converts Markdown text to basic HTML for display.
+         * Simplifies bolding and lists which Gemini often uses.
+         * @param {string} markdown - The text in Markdown format.
+         * @returns {string} The text in HTML format.
+         */
+        function markdownToHtml(markdown) {
+            let html = markdown
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // **bold**
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')     // *italic*
+                .replace(/^- (.*)/gm, '<li>$1</li>')     // - list item
+                .replace(/(\n<li>.*?<\/li>)/s, '<ul>$1</ul>'); // wrap lists (simple)
+            
+            // Basic line break handling
+            html = html.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
+            
+            return html;
+        }
+
+        /**
+         * Handles the form submission and API call.
+         */
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const userText = userInput.value.trim();
+            if (!userText) return;
+
+            // 1. Display user message
+            displayMessage(userText, 'user');
+            
+            // 2. Add user message to history
+            conversationHistory.push({ role: "user", parts: [{ text: userText }] });
+
+            // 3. Clear input and disable button
+            userInput.value = '';
+            sendButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            statusMessage.classList.add('hidden');
+            
+            let attempts = 0;
+            const maxAttempts = 3;
+            let success = false;
+            let botResponseText = "I'm sorry, I'm having trouble connecting right now. Please try again in a moment.";
+
+            while (attempts < maxAttempts && !success) {
+                attempts++;
+                try {
+                    const payload = {
+                        contents: conversationHistory,
+                        systemInstruction: { parts: [{ text: systemPrompt }] },
+                    };
+
+                    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    
+                    const candidate = result.candidates?.[0];
+
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        botResponseText = candidate.content.parts[0].text;
+                        success = true;
+                    } else {
+                        // Handle case where API call succeeds but response is empty/invalid
+                        console.error("API response structure unexpected or blocked.");
+                        if (attempts < maxAttempts) {
+                            await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000)); // Exponential backoff
+                        }
+                    }
+
+                } catch (error) {
+                    console.error("Error calling Gemini API:", error);
+                    if (attempts < maxAttempts) {
+                        // Wait using exponential backoff before retrying
+                        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempts) * 1000));
+                    } else {
+                        statusMessage.textContent = "Network error: Could not reach the service after multiple retries.";
+                        statusMessage.classList.remove('hidden');
+                        break;
+                    }
+                }
+            }
+
+            // 4. Display bot message and re-enable UI
+            loadingIndicator.classList.add('hidden');
+            sendButton.disabled = false;
+            userInput.focus();
+
+            // Only proceed if a response was successfully generated or after max retries
+            if (success || attempts >= maxAttempts) {
+                // Display the response
+                const htmlResponse = markdownToHtml(botResponseText);
+                displayMessage(htmlResponse, 'bot');
+                
+                // Add bot response to history for context
+                conversationHistory.push({ role: "model", parts: [{ text: botResponseText }] });
+            }
+        });
+        
+        // Ensure the input field is focused when the page loads
+        window.onload = () => {
+            userInput.focus();
+        };
+
+    </script>
+</body>
+</html>
